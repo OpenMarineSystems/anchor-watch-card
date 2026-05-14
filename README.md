@@ -129,7 +129,6 @@ longitude_entity: sensor.gps_longitude
 heading_entity: sensor.gps_heading
 depth_entity: sensor.depth
 
-boat_type: catamaran
 card_height: 500px
 
 default_scope: 3
