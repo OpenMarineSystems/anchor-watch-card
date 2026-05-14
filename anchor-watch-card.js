@@ -34,6 +34,13 @@ class AnchorWatchCard extends HTMLElement {
 
     this.lastPositionSaveTime = 0;
     this.lastRenderedDepth = null;
+    this.lastInputSnapshot = "";
+    this.lastProcessedUpdateTime = 0;
+    this.lastHelperSnapshot = "";
+    this.lastAlarmCandidate = null;
+    this.lastAlarmCandidateSince = 0;
+    this.lastGpsOkCandidate = null;
+    this.lastGpsOkCandidateSince = 0;
 
     // Safety guard: Home Assistant calls set hass() for every entity update.
     // This prevents unrelated high-rate NMEA/SmartBoat updates from making
@@ -41,6 +48,10 @@ class AnchorWatchCard extends HTMLElement {
     this.lastInputSnapshot = "";
     this.lastProcessedUpdateTime = 0;
     this.lastHelperSnapshot = "";
+    this.lastAlarmCandidate = null;
+    this.lastAlarmCandidateSince = 0;
+    this.lastGpsOkCandidate = null;
+    this.lastGpsOkCandidateSince = 0;
   }
 
   setConfig(config) {
@@ -58,6 +69,9 @@ class AnchorWatchCard extends HTMLElement {
     this.breadcrumbMaxPoints = Number(config.breadcrumb_max_points ?? 90);
     this.gpsTimeout = Number(config.gps_timeout_seconds ?? 30) * 1000;
     this.updateInterval = Number(config.update_interval_ms ?? 1000);
+    this.alarmPublishStabilityMs = Number(config.alarm_publish_stability_ms ?? 2000);
+    this.gpsPublishStabilityMs = Number(config.gps_publish_stability_ms ?? 3000);
+    this.positionPrecision = Number(config.position_precision ?? 6);
 
     this.helpers = {
       anchorSet: config.anchor_set_helper || config.helpers?.anchor_set,
@@ -940,10 +954,10 @@ class AnchorWatchCard extends HTMLElement {
     });
 
     const inputSnapshot = JSON.stringify({
-      lat,
-      lon,
-      hdg,
-      depth,
+      lat: this.snapshotNumber(lat, this.positionPrecision),
+      lon: this.snapshotNumber(lon, this.positionPrecision),
+      hdg: this.snapshotNumber(hdg, 1),
+      depth: this.snapshotNumber(depth, 1),
       helpers: helperSnapshot
     });
 
@@ -1472,7 +1486,8 @@ class AnchorWatchCard extends HTMLElement {
   }
 
   updateAlarmState(forceState = null) {
-    const publishAllowed = !this.anchorDragging && Date.now() >= this.ignoreHelperSyncUntil;
+    const now = Date.now();
+    const publishAllowed = !this.anchorDragging && now >= this.ignoreHelperSyncUntil;
 
     const gpsTimedOut = this.lastGpsUpdate && Date.now() - this.lastGpsUpdate > this.gpsTimeout;
     const gpsOk = !this.gpsLost && !gpsTimedOut && this.validPosition(this.currentLat, this.currentLon);
@@ -1480,15 +1495,15 @@ class AnchorWatchCard extends HTMLElement {
     if (!gpsOk) {
       this.gpsLost = true;
       if (publishAllowed) {
-        this.publishGpsOk(false);
-        this.publishAlarmState("gps_lost");
+        this.publishGpsOkStable(false, now);
+        this.publishAlarmStateStable("gps_lost", now);
       }
       this.setAlarmGraphics("#808080", 0.14);
       return;
     }
 
     if (publishAllowed) {
-      this.publishGpsOk(true);
+      this.publishGpsOkStable(true, now);
     }
 
     if (forceState) {
@@ -1500,14 +1515,14 @@ class AnchorWatchCard extends HTMLElement {
 
     if (this.alarmRadius === null || this.anchorLat === null || this.anchorLon === null) {
       if (publishAllowed) {
-        this.publishAlarmState("idle");
+        this.publishAlarmStateStable("idle", now);
       }
       return;
     }
 
     if (!this.validPosition(this.anchorLat, this.anchorLon)) {
       if (publishAllowed) {
-        this.publishAlarmState("sensor_fault");
+        this.publishAlarmStateStable("sensor_fault", now);
       }
       this.setAlarmGraphics("#808080", 0.14);
       return;
@@ -1538,7 +1553,7 @@ class AnchorWatchCard extends HTMLElement {
     }
 
     if (publishAllowed) {
-      this.publishAlarmState(state);
+      this.publishAlarmStateStable(state, now);
     }
     this.setAlarmGraphics(color, 0.10);
   }
@@ -1810,9 +1825,38 @@ class AnchorWatchCard extends HTMLElement {
     }
   }
 
+  snapshotNumber(value, decimals) {
+    const n = Number(value);
+    if (isNaN(n)) return null;
+    const factor = Math.pow(10, decimals);
+    return Math.round(n * factor) / factor;
+  }
+
   async publishGpsOk(ok) {
     const entity = this.helpers?.gpsOk;
     await this.publishHelperBoolean(entity, ok);
+  }
+
+  publishGpsOkStable(ok, now = Date.now()) {
+    if (this.lastGpsOkCandidate !== ok) {
+      this.lastGpsOkCandidate = ok;
+      this.lastGpsOkCandidateSince = now;
+      return;
+    }
+
+    if (now - this.lastGpsOkCandidateSince < this.gpsPublishStabilityMs) return;
+    this.publishGpsOk(ok);
+  }
+
+  publishAlarmStateStable(state, now = Date.now()) {
+    if (this.lastAlarmCandidate !== state) {
+      this.lastAlarmCandidate = state;
+      this.lastAlarmCandidateSince = now;
+      return;
+    }
+
+    if (now - this.lastAlarmCandidateSince < this.alarmPublishStabilityMs) return;
+    this.publishAlarmState(state);
   }
 
   async publishAlarmState(state) {
