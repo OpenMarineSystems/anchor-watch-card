@@ -6,7 +6,7 @@ Even premium systems from spelaized marine brands often felt like they needed wa
 
 Anchor Watch Card was built by sailors for sailors around one idea:
 
-**Drop anchor. Confirm position. Know immediately if you're dragging, either on board or remotely.**
+**Drop anchor with chain length suggestions, set actual scope, and your done. Know immediately if you're dragging via alerts and notifications, either on board or remotely.**
 
 No buried menus.  
 No hunting through multifunction displays.  
