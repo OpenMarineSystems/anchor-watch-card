@@ -39,6 +39,8 @@ class AnchorWatchCard extends HTMLElement {
     // This prevents unrelated high-rate NMEA/SmartBoat updates from making
     // the card redraw/publish when the inputs it actually uses did not change.
     this.lastInputSnapshot = "";
+    this.lastProcessedUpdateTime = 0;
+    this.lastHelperSnapshot = "";
   }
 
   setConfig(config) {
@@ -55,6 +57,7 @@ class AnchorWatchCard extends HTMLElement {
     this.breadcrumbInterval = Number(config.breadcrumb_interval_seconds ?? 20) * 1000;
     this.breadcrumbMaxPoints = Number(config.breadcrumb_max_points ?? 90);
     this.gpsTimeout = Number(config.gps_timeout_seconds ?? 30) * 1000;
+    this.updateInterval = Number(config.update_interval_ms ?? 1000);
 
     this.helpers = {
       anchorSet: config.anchor_set_helper || config.helpers?.anchor_set,
@@ -921,18 +924,12 @@ class AnchorWatchCard extends HTMLElement {
     this._hass = hass;
     if (!this.map) return;
 
-    this.syncAnchorStateFromHelpers();
-
     const lat = this.readNumber(hass, this.config.latitude_entity);
     const lon = this.readNumber(hass, this.config.longitude_entity);
     const hdg = this.readNumber(hass, this.config.heading_entity);
     const depth = this.readNumber(hass, this.config.depth_entity);
 
-    const inputSnapshot = JSON.stringify({
-      lat,
-      lon,
-      hdg,
-      depth,
+    const helperSnapshot = JSON.stringify({
       anchorSet: hass.states[this.helpers?.anchorSet]?.state,
       anchorLocked: hass.states[this.helpers?.anchorLocked]?.state,
       anchorLat: hass.states[this.helpers?.anchorLat]?.state,
@@ -942,11 +939,33 @@ class AnchorWatchCard extends HTMLElement {
       alarmState: hass.states[this.helpers?.alarmState]?.state
     });
 
+    const inputSnapshot = JSON.stringify({
+      lat,
+      lon,
+      hdg,
+      depth,
+      helpers: helperSnapshot
+    });
+
     if (inputSnapshot === this.lastInputSnapshot) {
       return;
     }
 
+    const now = Date.now();
+    const helperChanged = helperSnapshot !== this.lastHelperSnapshot;
+
+    // Safety rail: if GPS/NMEA arrives very fast, process visuals/alarm at a sane rate.
+    // Helper changes still pass immediately so button actions and external state sync remain responsive.
+    if (!helperChanged && this.lastProcessedUpdateTime && now - this.lastProcessedUpdateTime < this.updateInterval) {
+      this.lastInputSnapshot = inputSnapshot;
+      return;
+    }
+
     this.lastInputSnapshot = inputSnapshot;
+    this.lastHelperSnapshot = helperSnapshot;
+    this.lastProcessedUpdateTime = now;
+
+    this.syncAnchorStateFromHelpers();
 
     const gpsValid = this.validPosition(lat, lon);
 
