@@ -31,6 +31,9 @@ class AnchorWatchCard extends HTMLElement {
     this.anchorDragging = false;
     this.ignoreHelperSyncUntil = 0;
     this.localAnchorEditUntil = 0;
+
+    this.lastPositionSaveTime = 0;
+    this.lastRenderedDepth = null;
   }
 
   setConfig(config) {
@@ -56,7 +59,6 @@ class AnchorWatchCard extends HTMLElement {
       anchorLon: config.anchor_lon_helper || config.helpers?.anchor_longitude,
       swingRadius: config.swing_radius_helper || config.helpers?.swing_radius,
       alarmRadius: config.alarm_radius_helper || config.helpers?.alarm_radius,
-      distance: config.distance_helper || config.helpers?.distance,
       alarmState: config.alarm_state_helper || config.helpers?.alarm_state
     };
   }
@@ -77,6 +79,13 @@ class AnchorWatchCard extends HTMLElement {
     await this.waitForSize();
     this.initMap();
     this.attachEvents();
+  }
+
+  disconnectedCallback() {
+    if (this.map) {
+      this.map.remove();
+      this.map = null;
+    }
   }
 
   renderShell() {
@@ -478,6 +487,7 @@ class AnchorWatchCard extends HTMLElement {
   async waitForSize() {
     return new Promise(resolve => {
       const check = () => {
+        if (!this.root) return resolve();
         const rect = this.root.getBoundingClientRect();
         if (rect.width > 100 && rect.height > 100) {
           resolve();
@@ -536,8 +546,8 @@ class AnchorWatchCard extends HTMLElement {
 
     this.updateAnchorUi();
 
-    setTimeout(() => this.map.invalidateSize(true), 100);
-    setTimeout(() => this.map.invalidateSize(true), 600);
+    setTimeout(() => this.map?.invalidateSize(true), 100);
+    setTimeout(() => this.map?.invalidateSize(true), 600);
   }
 
   createBoatIcon(type) {
@@ -666,79 +676,36 @@ class AnchorWatchCard extends HTMLElement {
             </linearGradient>
           </defs>
 
-          <line
-            x1="32"
-            y1="8"
-            x2="32"
-            y2="88"
-            stroke="rgba(222,232,242,0.22)"
-            stroke-width="1.2"
-            stroke-linecap="round"
-          />
+          <line x1="32" y1="8" x2="32" y2="88" stroke="rgba(222,232,242,0.22)" stroke-width="1.2" stroke-linecap="round"/>
 
           <path
-            d="
-              M32 6
-              C24 14, 16 36, 16 62
-              L16 82
-              Q16 88, 22 88
-              L42 88
-              Q48 88, 48 82
-              L48 62
-              C48 36, 40 14, 32 6
-              Z
-            "
+            d="M32 6 C24 14, 16 36, 16 62 L16 82 Q16 88, 22 88 L42 88 Q48 88, 48 82 L48 62 C48 36, 40 14, 32 6 Z"
             fill="url(#boatGrad)"
             stroke="#0b1520"
             stroke-width="2.8"
             stroke-linejoin="round"
           />
 
-          <path
-            d="M27 22 C23 38, 23 54, 23 82"
-            fill="none"
-            stroke="rgba(0,24,38,0.45)"
-            stroke-width="1.4"
-            stroke-linecap="round"
-          />
-
-          <path
-            d="M37 22 C41 38, 41 54, 41 82"
-            fill="none"
-            stroke="rgba(0,24,38,0.45)"
-            stroke-width="1.4"
-            stroke-linecap="round"
-          />
+          <path d="M27 22 C23 38, 23 54, 23 82" fill="none" stroke="rgba(0,24,38,0.45)" stroke-width="1.4" stroke-linecap="round"/>
+          <path d="M37 22 C41 38, 41 54, 41 82" fill="none" stroke="rgba(0,24,38,0.45)" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
       `;
     }
 
     return `
       <svg ${common}>
-        <path d="M17 5 L28 30 L24 58 L12 58 L8 30 Z"
-          fill="#ffffff" stroke="#001826" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M47 5 L56 30 L52 58 L40 58 L36 30 Z"
-          fill="#ffffff" stroke="#001826" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M20 29 L44 29 L44 42 L20 42 Z"
-          fill="#ffffff" stroke="#001826" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M26 18 L38 18 L42 29 L22 29 Z"
-          fill="#8fd8ff" stroke="#001826" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M17 5 L28 30 L24 58 L12 58 L8 30 Z" fill="#ffffff" stroke="#001826" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M47 5 L56 30 L52 58 L40 58 L36 30 Z" fill="#ffffff" stroke="#001826" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M20 29 L44 29 L44 42 L20 42 Z" fill="#ffffff" stroke="#001826" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M26 18 L38 18 L42 29 L22 29 Z" fill="#8fd8ff" stroke="#001826" stroke-width="2" stroke-linejoin="round"/>
       </svg>
     `;
   }
 
   attachEvents() {
-    this.shadowRoot.querySelector("#anchor-action").onclick = () => {
-      this.handleAnchorAction();
-    };
-
-    this.shadowRoot.querySelector("#raise-anchor").onclick = () => {
-      this.raiseAnchor();
-    };
-
-    this.shadowRoot.querySelector("#center-boat").onclick = () => {
-      this.centerOnBoat();
-    };
+    this.shadowRoot.querySelector("#anchor-action").onclick = () => this.handleAnchorAction();
+    this.shadowRoot.querySelector("#raise-anchor").onclick = () => this.raiseAnchor();
+    this.shadowRoot.querySelector("#center-boat").onclick = () => this.centerOnBoat();
 
     this.setupHoldButton(
       this.shadowRoot.querySelector("#swing-plus"),
@@ -803,15 +770,7 @@ class AnchorWatchCard extends HTMLElement {
 
       infoPanel.style.display = "block";
       adjustPanel.style.display = this.anchorLocked ? "none" : "block";
-
-      if (this.anchorMarker?.dragging) {
-        if (this.anchorLocked) {
-          this.anchorMarker.dragging.disable();
-        } else {
-          this.anchorMarker.dragging.enable();
-        }
-      }
-
+      this.updateAnchorDragState();
       return;
     }
 
@@ -864,12 +823,16 @@ class AnchorWatchCard extends HTMLElement {
       adjustPanel.style.display = "block";
     }
 
-    if (this.anchorMarker?.dragging) {
-      if (this.anchorLocked) {
-        this.anchorMarker.dragging.disable();
-      } else {
-        this.anchorMarker.dragging.enable();
-      }
+    this.updateAnchorDragState();
+  }
+
+  updateAnchorDragState() {
+    if (!this.anchorMarker?.dragging) return;
+
+    if (this.anchorLocked) {
+      this.anchorMarker.dragging.disable();
+    } else {
+      this.anchorMarker.dragging.enable();
     }
   }
 
@@ -969,7 +932,7 @@ class AnchorWatchCard extends HTMLElement {
       this.currentLon = lon;
 
       const pos = [lat, lon];
-      this.saveLastPosition(pos);
+      this.saveLastPositionThrottled(pos);
       this.boatMarker.setLatLng(pos);
       this.updateBreadcrumbs(pos);
 
@@ -995,16 +958,28 @@ class AnchorWatchCard extends HTMLElement {
       this.currentDepth = depth;
     }
 
-    const depthBox = this.shadowRoot.querySelector("#depth");
-    if (depthBox) {
-      depthBox.innerHTML = !isNaN(this.currentDepth)
-        ? `${this.currentDepth.toFixed(1)} m`
-        : "--.- m";
+    this.updateDepthDisplay();
+
+    if (this.anchorLat === null) {
+      this.updateDistance();
+      this.updateAlarmState();
     }
 
-    this.updateDistance();
-    this.updateAlarmState();
     this.updateAnchorUi();
+  }
+
+  updateDepthDisplay() {
+    const depthBox = this.shadowRoot.querySelector("#depth");
+    if (!depthBox) return;
+
+    const display = !isNaN(this.currentDepth)
+      ? `${this.currentDepth.toFixed(1)} m`
+      : "--.- m";
+
+    if (this.lastRenderedDepth === display) return;
+
+    this.lastRenderedDepth = display;
+    depthBox.innerHTML = display;
   }
 
   updateBreadcrumbs(pos) {
@@ -1031,10 +1006,11 @@ class AnchorWatchCard extends HTMLElement {
       this.breadcrumbLine.setLatLngs(this.breadcrumbs);
     } else {
       this.breadcrumbLine = L.polyline(this.breadcrumbs, {
-        color: "#d7ecff",
-        weight: 2,
-        opacity: 0.45,
-        dashArray: "2,8"
+        color: "#8fa8bc",
+        weight: 3,
+        opacity: 0.38,
+        dashArray: "3,10",
+        lineCap: "round"
       }).addTo(this.map);
     }
   }
@@ -1090,12 +1066,12 @@ class AnchorWatchCard extends HTMLElement {
       10
     );
 
-    const north = this.destinationPoint(this.anchorLat, this.anchorLon, 0, radius);
-    const east = this.destinationPoint(this.anchorLat, this.anchorLon, 90, radius);
-    const south = this.destinationPoint(this.anchorLat, this.anchorLon, 180, radius);
-    const west = this.destinationPoint(this.anchorLat, this.anchorLon, 270, radius);
-
-    points.push(north, east, south, west);
+    points.push(
+      this.destinationPoint(this.anchorLat, this.anchorLon, 0, radius),
+      this.destinationPoint(this.anchorLat, this.anchorLon, 90, radius),
+      this.destinationPoint(this.anchorLat, this.anchorLon, 180, radius),
+      this.destinationPoint(this.anchorLat, this.anchorLon, 270, radius)
+    );
 
     const bounds = L.latLngBounds(points);
     const padding = this.getVisibleFitPadding();
@@ -1452,8 +1428,6 @@ class AnchorWatchCard extends HTMLElement {
   }
 
   updateAlarmState(forceState = null) {
-    const h = this.helpers || {};
-
     const publishAllowed = !this.anchorDragging && Date.now() >= this.ignoreHelperSyncUntil;
 
     const gpsTimedOut = this.lastGpsUpdate && Date.now() - this.lastGpsUpdate > this.gpsTimeout;
@@ -1474,7 +1448,9 @@ class AnchorWatchCard extends HTMLElement {
     }
 
     if (forceState) {
-      this.publishAlarmState(forceState);
+      if (publishAllowed) {
+        this.publishAlarmState(forceState);
+      }
       return;
     }
 
@@ -1499,10 +1475,6 @@ class AnchorWatchCard extends HTMLElement {
       this.anchorLat,
       this.anchorLon
     );
-
-    if (publishAllowed) {
-      this.publishHelperNumber(h.distance, Math.round(distance));
-    }
 
     let state = "safe";
     let color = "#00d060";
@@ -1597,14 +1569,9 @@ class AnchorWatchCard extends HTMLElement {
     if (this.loadAnchorStateFromHelpers()) return;
 
     try {
-      const saved = JSON.parse(
-        localStorage.getItem("anchor-watch-state")
-      );
+      const saved = JSON.parse(localStorage.getItem("anchor-watch-state"));
 
-      if (
-        saved &&
-        this.validPosition(saved.anchorLat, saved.anchorLon)
-      ) {
+      if (saved && this.validPosition(saved.anchorLat, saved.anchorLon)) {
         this.anchorLat = saved.anchorLat;
         this.anchorLon = saved.anchorLon;
         this.swingRadius = Number(saved.swingRadius);
@@ -1643,6 +1610,7 @@ class AnchorWatchCard extends HTMLElement {
     if (!helperAnchorSet && helperAlarmState === "idle") {
       return false;
     }
+
     const lat = this.readNumber(this._hass, h.anchorLat);
     const lon = this.readNumber(this._hass, h.anchorLon);
     const swing = this.readNumber(this._hass, h.swingRadius);
@@ -1682,6 +1650,7 @@ class AnchorWatchCard extends HTMLElement {
       }
       return;
     }
+
     const lat = this.readNumber(this._hass, h.anchorLat);
     const lon = this.readNumber(this._hass, h.anchorLon);
     const swing = this.readNumber(this._hass, h.swingRadius);
@@ -1791,7 +1760,6 @@ class AnchorWatchCard extends HTMLElement {
     try {
       await this.publishHelperBoolean(h.anchorSet, false);
       await this.publishHelperBoolean(h.anchorLocked, false);
-      await this.publishHelperNumber(h.distance, 0);
       await this.publishAlarmState("idle");
     } finally {
       this.helperSyncInProgress = false;
@@ -1805,7 +1773,7 @@ class AnchorWatchCard extends HTMLElement {
 
   async publishAlarmState(state) {
     const entity = this.helpers?.alarmState;
-    if (!entity || !state || this.lastPublished[entity] === state) return;
+    if (!this._hass || !entity || !state || this.lastPublished[entity] === state) return;
 
     this.lastPublished[entity] = state;
 
@@ -1824,7 +1792,7 @@ class AnchorWatchCard extends HTMLElement {
 
     const rounded = Number(value);
 
-    if ((entity === this.helpers?.distance || entity === this.helpers?.swingRadius || entity === this.helpers?.alarmRadius) && rounded > 50000) {
+    if ((entity === this.helpers?.swingRadius || entity === this.helpers?.alarmRadius) && rounded > 50000) {
       console.warn("Anchor Watch Card: blocked unrealistic helper value", entity, rounded);
       return;
     }
@@ -1863,9 +1831,7 @@ class AnchorWatchCard extends HTMLElement {
 
   getLastPosition() {
     try {
-      const saved = JSON.parse(
-        localStorage.getItem("anchor-watch-last-position")
-      );
+      const saved = JSON.parse(localStorage.getItem("anchor-watch-last-position"));
 
       if (saved && this.validPosition(saved[0], saved[1])) {
         return saved;
@@ -1875,11 +1841,16 @@ class AnchorWatchCard extends HTMLElement {
     return [42.4304, 18.6907];
   }
 
+  saveLastPositionThrottled(pos) {
+    const now = Date.now();
+    if (this.lastPositionSaveTime && now - this.lastPositionSaveTime < 10000) return;
+
+    this.lastPositionSaveTime = now;
+    this.saveLastPosition(pos);
+  }
+
   saveLastPosition(pos) {
-    localStorage.setItem(
-      "anchor-watch-last-position",
-      JSON.stringify(pos)
-    );
+    localStorage.setItem("anchor-watch-last-position", JSON.stringify(pos));
   }
 
   async loadLeaflet() {
@@ -1888,6 +1859,12 @@ class AnchorWatchCard extends HTMLElement {
 
   loadJS(src) {
     return new Promise((resolve, reject) => {
+      const existing = Array.from(document.scripts).find(s => s.src === src);
+      if (existing) {
+        resolve();
+        return;
+      }
+
       const s = document.createElement("script");
       s.src = src;
       s.onload = resolve;
@@ -1898,6 +1875,12 @@ class AnchorWatchCard extends HTMLElement {
 
   loadCSS(src) {
     return new Promise(resolve => {
+      const existing = Array.from(document.querySelectorAll("link[rel='stylesheet']")).find(s => s.href === src);
+      if (existing) {
+        resolve();
+        return;
+      }
+
       const s = document.createElement("link");
       s.rel = "stylesheet";
       s.href = src;
