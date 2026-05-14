@@ -34,6 +34,11 @@ class AnchorWatchCard extends HTMLElement {
 
     this.lastPositionSaveTime = 0;
     this.lastRenderedDepth = null;
+
+    // Safety guard: Home Assistant calls set hass() for every entity update.
+    // This prevents unrelated high-rate NMEA/SmartBoat updates from making
+    // the card redraw/publish when the inputs it actually uses did not change.
+    this.lastInputSnapshot = "";
   }
 
   setConfig(config) {
@@ -922,6 +927,26 @@ class AnchorWatchCard extends HTMLElement {
     const lon = this.readNumber(hass, this.config.longitude_entity);
     const hdg = this.readNumber(hass, this.config.heading_entity);
     const depth = this.readNumber(hass, this.config.depth_entity);
+
+    const inputSnapshot = JSON.stringify({
+      lat,
+      lon,
+      hdg,
+      depth,
+      anchorSet: hass.states[this.helpers?.anchorSet]?.state,
+      anchorLocked: hass.states[this.helpers?.anchorLocked]?.state,
+      anchorLat: hass.states[this.helpers?.anchorLat]?.state,
+      anchorLon: hass.states[this.helpers?.anchorLon]?.state,
+      swingRadius: hass.states[this.helpers?.swingRadius]?.state,
+      alarmRadius: hass.states[this.helpers?.alarmRadius]?.state,
+      alarmState: hass.states[this.helpers?.alarmState]?.state
+    });
+
+    if (inputSnapshot === this.lastInputSnapshot) {
+      return;
+    }
+
+    this.lastInputSnapshot = inputSnapshot;
 
     const gpsValid = this.validPosition(lat, lon);
 
